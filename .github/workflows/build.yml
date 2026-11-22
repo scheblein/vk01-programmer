@@ -1,0 +1,59 @@
+name: Build & Release macOS App
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build & Test (macOS arm64)
+    runs-on: macos-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show Swift toolchain version
+        run: |
+          swift --version
+          uname -m
+
+      - name: Build VK01Programmer.app and vk01-cli
+        run: ./scripts/bundle_app.sh
+
+      - name: Run VK-01 protocol round-trip self-test
+        run: ./VK01Programmer.app/Contents/MacOS/vk01-cli selftest
+
+      - name: Package VK01Programmer-macOS-arm64.zip
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent VK01Programmer.app VK01Programmer-macOS-arm64.zip
+          ls -lh VK01Programmer-macOS-arm64.zip
+
+      - name: Upload macOS app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VK01Programmer-macOS-arm64
+          path: VK01Programmer-macOS-arm64.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release on version tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" VK01Programmer-macOS-arm64.zip --clobber
+          else
+            gh release create "$TAG" VK01Programmer-macOS-arm64.zip \
+              --title "$TAG" \
+              --generate-notes
+          fi
